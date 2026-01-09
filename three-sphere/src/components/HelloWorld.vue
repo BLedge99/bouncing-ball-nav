@@ -4,12 +4,18 @@ import { ref } from 'vue'
 defineProps<{ msg: string }>()
 
 const count = ref(0)
+
+function handleClick() {
+  count.value++
+  const action = count.value % 2 === 1 ? 'top' : 'side'
+  window.dispatchEvent(new CustomEvent('camera-action', { detail: { action } }))
+}
 </script>
 
 <template>
   <div class="overlay">
     <h1>{{ msg }}</h1>
-    <button type="button" @click="count++">count is {{ count }}</button>
+    <button type="button" @click="handleClick">count is {{ count }}</button>
     <p>
       Edit
       <code>components/HelloWorld.vue</code> to test HMR

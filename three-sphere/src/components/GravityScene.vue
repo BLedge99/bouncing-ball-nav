@@ -8,6 +8,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import * as THREE from 'three'
+import { gsap } from 'gsap'
 import '../style.css'
 import { getUserId, getPosition, savePosition, getHealth, updateHealth } from '../services/api'
 
@@ -24,6 +25,7 @@ let renderer = null
 let onMouseMove = null
 let saveInterval = null
 let sphere = null
+let cameraActionHandler = null
 
 onMounted(async () => {
     const scene = new THREE.Scene();
@@ -159,12 +161,41 @@ onMounted(async () => {
         }
 
         // Take damage on bounce (only for X and Y walls, not Z)
-        if (tookDamage && health.value > 0) {
+        if (tookDamage && health.value > 0) {                              
             health.value = Math.max(0, health.value - 5);
             // Update backend (debounced - only update if health changed)
             updateHealth(userId, health.value, maxHealth.value).catch(console.error);
         }
     }
+    
+    function cameraToTop() {
+        gsap.to(camera.position, {
+            duration: 3,
+            x: 0,
+            y: 10,
+            z: 10, // or 0 for directly above
+            onUpdate: () => camera.lookAt(0, 0, 0)
+        });
+    }
+
+        function cameraToSide() {
+            gsap.to(camera.position, {
+                duration: 3,
+                x: 0,
+                y: 0,
+                z: 30,
+                onUpdate: () => {
+                    camera.lookAt(0, 0, 0);
+                }
+            });
+        }
+
+    cameraActionHandler = (e) => {
+        const action = e?.detail?.action;
+        if (action === 'top') cameraToTop();
+        else if (action === 'side') cameraToSide();
+    };
+    window.addEventListener('camera-action', cameraActionHandler);
 
     function animate() {
         requestAnimationFrame(animate);
@@ -207,6 +238,9 @@ onUnmounted(async () => {
     if (onMouseMove) window.removeEventListener('mousemove', onMouseMove);
     if (saveInterval) clearInterval(saveInterval);
     if (renderer) renderer.dispose();
+
+    // Clean up event listener
+    if (cameraActionHandler) window.removeEventListener('camera-action', cameraActionHandler);
 
     // Final save on unmount
     if (sphere) {
