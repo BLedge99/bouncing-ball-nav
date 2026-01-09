@@ -29,11 +29,11 @@ let cameraActionHandler = null
 
 onMounted(async () => {
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ canvas: canvas.value, alpha: true });
 
     renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.position.setZ(30);
+    camera.position.setZ(100);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
@@ -48,10 +48,24 @@ onMounted(async () => {
 
     const sphereTexture = textureLoader.load('/pic1.png');
 
+    const roomSize = 120;
+    const half = roomSize / 2;
+
+    const roomMats = [];
+    for (let i = 0; i < 6; i++) {
+        roomMats.push(new THREE.MeshStandardMaterial({ color: 0x888888, side: THREE.BackSide }));
+    }
+    roomMats[3] = new THREE.MeshStandardMaterial({ map: backgroundTexture, side: THREE.BackSide });
+
+    const roomGeometry = new THREE.BoxGeometry(roomSize, roomSize, roomSize);
+    const room = new THREE.Mesh(roomGeometry, roomMats);
+    scene.add(room);
+
+
     const geometry = new THREE.SphereGeometry(5, 32, 32);
     const material = new THREE.MeshStandardMaterial({ map: sphereTexture, color: 0xFF6347, metalness: 0.2, roughness: 0.5 });
     sphere = new THREE.Mesh(geometry, material);
-    
+
     scene.add(sphere);
 
     // Load initial position and health from backend
@@ -77,20 +91,16 @@ onMounted(async () => {
     const damping = 0.9;
     const airResistance = 0.99;
 
-    const fov = camera.fov * (Math.PI / 180);
-    const height = 2 * Math.tan(fov / 2) * camera.position.z;
-    const width = height * camera.aspect;
+    const ballRadius = 5;
 
     const bounds = {
-        top: height / 2 - 5,
-        bottom: -height / 2 + 5,
-        left: -width / 2 + 5,
-        right: width / 2 - 5,
-        front: 5,
-        back: -10
+        top: half - ballRadius,
+        bottom: -half + ballRadius,
+        left: -half + ballRadius,
+        right: half - ballRadius,
+        front: half - ballRadius,
+        back: -half + ballRadius
     };
-
-    const ballRadius = 5;
 
     const mouse3D = new THREE.Vector3(0, 0, 0);
     const raycaster = new THREE.Raycaster();
@@ -103,6 +113,12 @@ onMounted(async () => {
 
         mouseNormalized.x = mouseX;
         mouseNormalized.y = mouseY;
+
+        // Update plane to sphere's Z position so cursor tracking works at any depth
+        planeZ.setFromNormalAndCoplanarPoint(
+            new THREE.Vector3(0, 0, 1),
+            new THREE.Vector3(0, 0, sphere.position.z)
+        );
 
         raycaster.setFromCamera(mouseNormalized, camera);
         raycaster.ray.intersectPlane(planeZ, mouse3D);
@@ -189,7 +205,7 @@ onMounted(async () => {
                 duration: 3,
                 x: 0,
                 y: 0,
-                z: 30,
+                z: 100,
                 onUpdate: () => {
                     camera.lookAt(0, 0, 0);
                 }
