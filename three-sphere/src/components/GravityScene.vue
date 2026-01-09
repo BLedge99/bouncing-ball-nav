@@ -35,6 +35,12 @@ onMounted(async () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.position.setZ(30);
 
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const pointLight = new THREE.PointLight(0xffffff, 1);
+    pointLight.position.set(10, 30, 10);
+    scene.add(pointLight);
+
     const textureLoader = new THREE.TextureLoader();
 
     const backgroundTexture = textureLoader.load('/pic2.png');
@@ -43,9 +49,9 @@ onMounted(async () => {
     const sphereTexture = textureLoader.load('/pic1.png');
 
     const geometry = new THREE.SphereGeometry(5, 32, 32);
-    const material = new THREE.MeshBasicMaterial({map: sphereTexture, color: 0xFF6347, wireframe: false });
+    const material = new THREE.MeshStandardMaterial({ map: sphereTexture, color: 0xFF6347, metalness: 0.2, roughness: 0.5 });
     sphere = new THREE.Mesh(geometry, material);
-
+    
     scene.add(sphere);
 
     // Load initial position and health from backend
