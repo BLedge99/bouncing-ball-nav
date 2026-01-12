@@ -2,6 +2,7 @@
   <div>
     <canvas ref="canvas" class="three-canvas"></canvas>
     <div class="health-display">Health: {{ health }}/{{ maxHealth }}</div>
+    <button class="reset-button" @click="resetBallPosition">Reset Ball Position</button>
   </div>
 </template>
 
@@ -26,12 +27,32 @@ let onMouseMove = null
 let saveInterval = null
 let sphere = null
 let cameraActionHandler = null
+let onWindowResize = null
+
+// Physics / room constants moved to module scope so template can access reset
+const roomSize = 120;
+const ballRadius = 5;
+const half = roomSize / 2;
+
+// Shared physics vector so resetBallPosition can access it
+let velocity = new THREE.Vector3(0, 0, 0);
+const gravity = -0.98;
+const damping = 0.9;
+const airResistance = 0.99;
+
+function resetBallPosition() {
+    if (sphere) {
+        sphere.position.set(half - ballRadius, 0, 0);
+        velocity.set(0, 0, 0);
+    }
+}
 
 onMounted(async () => {
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
-    renderer = new THREE.WebGLRenderer({ canvas: canvas.value, alpha: true });
+    renderer = new THREE.WebGLRenderer({ canvas: canvas.value, alpha: true, antialias: true });
 
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.position.setZ(100);
 
@@ -48,9 +69,6 @@ onMounted(async () => {
 
     const sphereTexture = textureLoader.load('/pic1.png');
 
-    const roomSize = 120;
-    const half = roomSize / 2;
-
     const roomMats = [];
     for (let i = 0; i < 6; i++) {
         roomMats.push(new THREE.MeshStandardMaterial({ color: 0x888888, side: THREE.BackSide }));
@@ -62,7 +80,7 @@ onMounted(async () => {
     scene.add(room);
 
 
-    const geometry = new THREE.SphereGeometry(5, 32, 32);
+    const geometry = new THREE.SphereGeometry(ballRadius, 32, 32);
     const material = new THREE.MeshStandardMaterial({ map: sphereTexture, color: 0xFF6347, metalness: 0.2, roughness: 0.5 });
     sphere = new THREE.Mesh(geometry, material);
 
@@ -86,13 +104,6 @@ onMounted(async () => {
         console.error('Error loading game state:', error);
     }
 
-    const velocity = new THREE.Vector3(0, 0, 0);
-    const gravity = -0.98;
-    const damping = 0.9;
-    const airResistance = 0.99;
-
-    const ballRadius = 5;
-
     const bounds = {
         top: half - ballRadius,
         bottom: -half + ballRadius,
@@ -106,6 +117,17 @@ onMounted(async () => {
     const raycaster = new THREE.Raycaster();
     const mouseNormalized = new THREE.Vector2();
     const planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+    // Resize handler keeps camera and renderer correct when entering fullscreen or resizing
+    onWindowResize = () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    };
+    window.addEventListener('resize', onWindowResize);
 
     onMouseMove = (event) => {
         const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
@@ -137,6 +159,8 @@ onMounted(async () => {
             velocity.add(cursorForce);
         }
     }
+
+    // resetBallPosition is implemented at module scope so template can call it
 
     function processBallBounce(){
         let tookDamage = false;
@@ -205,7 +229,7 @@ onMounted(async () => {
                 duration: 3,
                 x: 0,
                 y: 0,
-                z: 100,
+                z: 100  ,
                 onUpdate: () => {
                     camera.lookAt(0, 0, 0);
                 }
@@ -263,6 +287,7 @@ onUnmounted(async () => {
 
     // Clean up event listener
     if (cameraActionHandler) window.removeEventListener('camera-action', cameraActionHandler);
+    if (onWindowResize) window.removeEventListener('resize', onWindowResize);
 
     // Final save on unmount
     if (sphere) {
@@ -306,5 +331,19 @@ onUnmounted(async () => {
     z-index: 1000;
     pointer-events: none;
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.reset-button {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 1000;
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    background-color: #ff6347;
+    color: white;
+    cursor: pointer;
 }
 </style>
