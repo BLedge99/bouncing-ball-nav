@@ -86,6 +86,26 @@ onMounted(async () => {
 
     scene.add(sphere);
 
+    //Add Spikes 
+    const spikes = [];
+    const spikeCount = 15;
+    const spikeHeight = 15;
+    const spikeRadius = 2;
+    const spikeGeometry = new THREE.ConeGeometry(spikeRadius, spikeHeight, 8);
+    const spikeMaterial = new THREE.MeshStandardMaterial({ color: 0xff6347, metalness: 1.0, roughness: 0.2 });
+    const floorY = -half; 
+    for (let i = 0; i < spikeCount; i++) {
+        const spike = new THREE.Mesh(spikeGeometry, spikeMaterial);
+        const margin = 8;
+        const x = THREE.MathUtils.randFloat(-half + margin, half - margin);
+        const z = THREE.MathUtils.randFloat(-half + margin, half - margin);
+        spike.position.set(x, floorY + spikeHeight / 2, z);
+        spike.castShadow = true;
+        spike.receiveShadow = true;
+        scene.add(spike);
+        spikes.push(spike);
+    }
+
     // Load initial position and health from backend
     try {
         const savedPosition = await getPosition(userId, currentLevel);
@@ -105,12 +125,12 @@ onMounted(async () => {
     }
 
     const bounds = {
-        top: half - ballRadius,
-        bottom: -half + ballRadius,
-        left: -half + ballRadius,
-        right: half - ballRadius,
-        front: half - ballRadius,
-        back: -half + ballRadius
+        top: half,
+        bottom: -half,
+        left: -half,
+        right: half,
+        front: half,
+        back: -half
     };
 
     const mouse3D = new THREE.Vector3(0, 0, 0);
@@ -170,28 +190,24 @@ onMounted(async () => {
             velocity.y = -velocity.y * damping;
             velocity.x *= damping;
             velocity.z *= damping;
-            tookDamage = true;
         }
         if (sphere.position.y + ballRadius >= bounds.top) {
             sphere.position.y = bounds.top - ballRadius;
             velocity.y = -velocity.y * damping;
             velocity.x *= damping;
             velocity.z *= damping;
-            tookDamage = true;
         }
         if (sphere.position.x - ballRadius <= bounds.left) {
             sphere.position.x = bounds.left + ballRadius;
             velocity.x = -velocity.x * damping;
             velocity.z *= damping;  
             velocity.y *= damping;
-            tookDamage = true;
         }
         if (sphere.position.x + ballRadius >= bounds.right) {
             sphere.position.x = bounds.right - ballRadius;
             velocity.x = -velocity.x * damping;
             velocity.z *= damping;
             velocity.y *= damping;
-            tookDamage = true;
         }
         if (sphere.position.z - ballRadius <= bounds.back) {
             sphere.position.z = bounds.back + ballRadius;
@@ -207,6 +223,30 @@ onMounted(async () => {
         }
 
         // Take damage on bounce (only for X and Y walls, not Z)
+        if (tookDamage && health.value > 0) {                              
+            health.value = Math.max(0, health.value - 5);
+            // Update backend (debounced - only update if health changed)
+            updateHealth(userId, health.value, maxHealth.value).catch(console.error);
+        }
+    }
+
+    function processSpikeCollisions(){
+        let tookDamage = false;
+        const now = Date.now();
+        for (let i = 0; i < spikes.length; i++) {
+            const spike = spikes[i];
+            const tip = new THREE.Vector3(spike.position.x, spike.position.y + spikeHeight / 2, spike.position.z);
+            const dist = tip.distanceTo(sphere.position);
+            // If the sphere is within (ballRadius + small tolerance) of the spike tip
+            if (dist <= ballRadius + 1.2) {
+                // simple global cooldown to avoid rapid repeated hits
+                if (now - lastSpikeHit > 500 && health.value > 0) {
+                    lastSpikeHit = now;
+                    tookDamage = true;
+                }
+            }
+
+        }
         if (tookDamage && health.value > 0) {                              
             health.value = Math.max(0, health.value - 5);
             // Update backend (debounced - only update if health changed)
