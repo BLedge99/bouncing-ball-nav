@@ -23,11 +23,16 @@ const maxHealth = ref(100);
 const canvas = ref(null)
 
 let renderer = null
+let camera = null
+let scene = null
 let onMouseMove = null
+let onKeyDown = null
+let onKeyUp = null
 let saveInterval = null
 let sphere = null
 let cameraActionHandler = null
 let onWindowResize = null
+let animationId = null
 
 // Physics / room constants moved to module scope so template can access reset
 const roomSize = 120;
@@ -36,30 +41,41 @@ const half = roomSize / 2;
 
 // Shared physics vector so resetBallPosition can access it
 let velocity = new THREE.Vector3(0, 0, 0);
-const gravity = -0.98;
-const damping = 0.9;
-const airResistance = 0.99;
+const gravity = -0.5;
+const damping = 0.85;
+const airResistance = 0.98;
+const restingThreshold = 0.3;
+const groundFriction = 0.95;
+const movementForce = 0.4;
+let isOnGround = false;
+let lastSpikeHit = 0;
+const spikeHitCooldown = 1000;
+const spikeDamage = 5;
 
 function resetBallPosition() {
     if (sphere) {
         sphere.position.set(half - ballRadius, 0, 0);
         velocity.set(0, 0, 0);
+        isOnGround = false;
     }
 }
 
 onMounted(async () => {
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
     renderer = new THREE.WebGLRenderer({ canvas: canvas.value, alpha: true, antialias: true });
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     camera.position.setZ(100);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
     const pointLight = new THREE.PointLight(0xffffff, 1);
     pointLight.position.set(10, 30, 10);
+    pointLight.castShadow = true;
     scene.add(pointLight);
 
     const textureLoader = new THREE.TextureLoader();
@@ -77,13 +93,14 @@ onMounted(async () => {
 
     const roomGeometry = new THREE.BoxGeometry(roomSize, roomSize, roomSize);
     const room = new THREE.Mesh(roomGeometry, roomMats);
+    room.receiveShadow = true;
     scene.add(room);
-
 
     const geometry = new THREE.SphereGeometry(ballRadius, 32, 32);
     const material = new THREE.MeshStandardMaterial({ map: sphereTexture, color: 0xFF6347, metalness: 0.2, roughness: 0.5 });
     sphere = new THREE.Mesh(geometry, material);
-
+    sphere.castShadow = true;
+    sphere.receiveShadow = true;
     scene.add(sphere);
 
     //Add Spikes 
@@ -122,6 +139,7 @@ onMounted(async () => {
         console.log('Loaded health:', healthData);
     } catch (error) {
         console.error('Error loading game state:', error);
+        sphere.position.set(half - ballRadius, 0, 0);
     }
 
     const bounds = {
@@ -130,7 +148,15 @@ onMounted(async () => {
         left: -half,
         right: half,
         front: half,
-        back: -half
+        back: -half,
+    };
+
+    const keysPressed = {
+        w: false,
+        a: false,
+        s: false,
+        d: false,
+        space: false,
     };
 
     const mouse3D = new THREE.Vector3(0, 0, 0);
@@ -166,6 +192,27 @@ onMounted(async () => {
         raycaster.ray.intersectPlane(planeZ, mouse3D);
     };
 
+    onKeyDown = (event) => {
+        if (event.key === 'w') keysPressed.w = true;
+        if (event.key === 'a') keysPressed.a = true;
+        if (event.key === 's') keysPressed.s = true;
+        if (event.key === 'd') keysPressed.d = true;
+        if (event.key === ' ') {
+            keysPressed.space = true;
+            event.preventDefault();
+        }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    onKeyUp = (event) => {
+        if (event.key === 'w') keysPressed.w = false;
+        if (event.key === 'a') keysPressed.a = false;
+        if (event.key === 's') keysPressed.s = false;
+        if (event.key === 'd') keysPressed.d = false;
+        if (event.key === ' ') keysPressed.space = false;
+    };
+    window.addEventListener('keyup', onKeyUp);
+
     function processCursorGravity() {
         const direction = new THREE.Vector3().subVectors(mouse3D, sphere.position);
         const distance = direction.length();
@@ -180,41 +227,59 @@ onMounted(async () => {
         }
     }
 
-    // resetBallPosition is implemented at module scope so template can call it
-
     function processBallBounce(){
-        let tookDamage = false;
+        let touchedGround = false;
 
+        // Bottom wall (floor in Y coordinate system)
         if (sphere.position.y - ballRadius <= bounds.bottom) {
             sphere.position.y = bounds.bottom + ballRadius;
-            velocity.y = -velocity.y * damping;
-            velocity.x *= damping;
-            velocity.z *= damping;
+            
+            if (Math.abs(velocity.y) < restingThreshold) {
+                velocity.y = 0;
+                isOnGround = true;
+                touchedGround = true;
+                velocity.x *= groundFriction;
+                velocity.z *= groundFriction;
+            } else {
+                velocity.y = -velocity.y * damping;
+                velocity.x *= damping;
+                velocity.z *= damping;
+            }
         }
+        
+        // Top wall
         if (sphere.position.y + ballRadius >= bounds.top) {
             sphere.position.y = bounds.top - ballRadius;
             velocity.y = -velocity.y * damping;
             velocity.x *= damping;
             velocity.z *= damping;
         }
+        
+        // Left wall
         if (sphere.position.x - ballRadius <= bounds.left) {
             sphere.position.x = bounds.left + ballRadius;
             velocity.x = -velocity.x * damping;
             velocity.z *= damping;  
             velocity.y *= damping;
         }
+        
+        // Right wall
         if (sphere.position.x + ballRadius >= bounds.right) {
             sphere.position.x = bounds.right - ballRadius;
             velocity.x = -velocity.x * damping;
             velocity.z *= damping;
             velocity.y *= damping;
         }
+        
+        // Back wall (Z)
         if (sphere.position.z - ballRadius <= bounds.back) {
             sphere.position.z = bounds.back + ballRadius;
             velocity.z = -velocity.z * damping;
             velocity.x *= damping;
             velocity.y *= damping;
         }
+        
+        // Front wall (Z)
         if (sphere.position.z + ballRadius >= bounds.front) {
             sphere.position.z = bounds.front - ballRadius;
             velocity.z = -velocity.z * damping;
@@ -222,36 +287,34 @@ onMounted(async () => {
             velocity.y *= damping;
         }
 
-        // Take damage on bounce (only for X and Y walls, not Z)
-        if (tookDamage && health.value > 0) {                              
-            health.value = Math.max(0, health.value - 5);
-            // Update backend (debounced - only update if health changed)
-            updateHealth(userId, health.value, maxHealth.value).catch(console.error);
+        if (!touchedGround) {
+            isOnGround = false;
         }
     }
 
     function processSpikeCollisions(){
-        let tookDamage = false;
         const now = Date.now();
         for (let i = 0; i < spikes.length; i++) {
             const spike = spikes[i];
             const tip = new THREE.Vector3(spike.position.x, spike.position.y + spikeHeight / 2, spike.position.z);
             const dist = tip.distanceTo(sphere.position);
-            // If the sphere is within (ballRadius + small tolerance) of the spike tip
+            
             if (dist <= ballRadius + 1.2) {
-                // simple global cooldown to avoid rapid repeated hits
-                if (now - lastSpikeHit > 500 && health.value > 0) {
+                if (now - lastSpikeHit > spikeHitCooldown && health.value > 0) {
                     lastSpikeHit = now;
-                    tookDamage = true;
+                    health.value = Math.max(0, health.value - spikeDamage);
+                    updateHealth(userId, health.value, maxHealth.value).catch(console.error);
                 }
             }
+        }
+    }
 
-        }
-        if (tookDamage && health.value > 0) {                              
-            health.value = Math.max(0, health.value - 5);
-            // Update backend (debounced - only update if health changed)
-            updateHealth(userId, health.value, maxHealth.value).catch(console.error);
-        }
+    function processMovement(){
+        if (keysPressed.w) velocity.z -= movementForce;
+        if (keysPressed.s) velocity.z += movementForce;
+        if (keysPressed.a) velocity.x -= movementForce;
+        if (keysPressed.d) velocity.x += movementForce;
+        if (keysPressed.space) velocity.y += movementForce;
     }
     
     function cameraToTop() {
@@ -259,22 +322,22 @@ onMounted(async () => {
             duration: 3,
             x: 0,
             y: 10,
-            z: 10, // or 0 for directly above
+            z: 10,
             onUpdate: () => camera.lookAt(0, 0, 0)
         });
     }
 
-        function cameraToSide() {
-            gsap.to(camera.position, {
-                duration: 3,
-                x: 0,
-                y: 0,
-                z: 100  ,
-                onUpdate: () => {
-                    camera.lookAt(0, 0, 0);
-                }
-            });
-        }
+    function cameraToSide() {
+        gsap.to(camera.position, {
+            duration: 3,
+            x: 0,
+            y: 0,
+            z: 100,
+            onUpdate: () => {
+                camera.lookAt(0, 0, 0);
+            }
+        });
+    }
 
     cameraActionHandler = (e) => {
         const action = e?.detail?.action;
@@ -284,15 +347,21 @@ onMounted(async () => {
     window.addEventListener('camera-action', cameraActionHandler);
 
     function animate() {
-        requestAnimationFrame(animate);
+        animationId = requestAnimationFrame(animate);
 
-        velocity.y += gravity * 0.01;
+        // Apply gravity only when not on ground
+        if (!isOnGround) {
+            velocity.y += gravity * 0.016;
+        }
+
         velocity.multiplyScalar(airResistance);
 
         sphere.position.add(velocity);
 
         processCursorGravity();
         processBallBounce();
+        processSpikeCollisions();
+        processMovement();
 
         sphere.rotation.x += 0.01;
         sphere.rotation.y += 0.01;
@@ -321,13 +390,14 @@ onMounted(async () => {
 });
 
 onUnmounted(async () => {
+    if (animationId) cancelAnimationFrame(animationId);
     if (onMouseMove) window.removeEventListener('mousemove', onMouseMove);
+    if (onKeyDown) window.removeEventListener('keydown', onKeyDown);
+    if (onKeyUp) window.removeEventListener('keyup', onKeyUp);
     if (saveInterval) clearInterval(saveInterval);
-    if (renderer) renderer.dispose();
-
-    // Clean up event listener
     if (cameraActionHandler) window.removeEventListener('camera-action', cameraActionHandler);
     if (onWindowResize) window.removeEventListener('resize', onWindowResize);
+    if (renderer) renderer.dispose();
 
     // Final save on unmount
     if (sphere) {
